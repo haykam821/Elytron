@@ -4,13 +4,14 @@ import net.minecraft.block.Block;
 import net.minecraft.enchantment.Enchantments;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
-import net.minecraft.nbt.NbtCompound;
 import net.minecraft.network.packet.s2c.play.TitleFadeS2CPacket;
 import net.minecraft.network.packet.s2c.play.TitleS2CPacket;
+import net.minecraft.registry.RegistryWrapper;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
 import net.minecraft.util.math.Vec3d;
+import xyz.nucleoid.plasmid.api.util.ItemStackBuilder;
 
 public class PlayerEntry {
 	private final ServerPlayerEntity player;
@@ -29,7 +30,7 @@ public class PlayerEntry {
 		this.player.networkHandler.sendPacket(titleFadePacket);
 		this.player.networkHandler.sendPacket(titlePacket);
 
-		this.player.startFallFlying();
+		this.player.startGliding();
 	}
 
 	public Text getDisplayName() {
@@ -63,14 +64,11 @@ public class PlayerEntry {
 	}
 
 	// Inventory
-	public static ItemStack getElytraStack() {
-		ItemStack stack = new ItemStack(Items.ELYTRA);
-		stack.addEnchantment(Enchantments.BINDING_CURSE, 1);
-
-		NbtCompound tag = stack.getOrCreateNbt();
-		tag.putBoolean("Unbreakable", true);
-
-		return stack;
+	public static ItemStack getElytraStack(RegistryWrapper.WrapperLookup registries) {
+		return ItemStackBuilder.of(Items.ELYTRA)
+			.addEnchantment(registries, Enchantments.BINDING_CURSE, 1)
+			.setUnbreakable()
+			.build();
 	}
 
 	public static ItemStack getFireworkRocketStack() {
