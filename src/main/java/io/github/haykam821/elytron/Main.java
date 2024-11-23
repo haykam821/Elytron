@@ -9,14 +9,14 @@ import net.fabricmc.api.ModInitializer;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.util.Identifier;
-import xyz.nucleoid.plasmid.game.GameType;
+import xyz.nucleoid.plasmid.api.game.GameType;
 
 public class Main implements ModInitializer {
-	public static final String MOD_ID = "elytron";
+	private static final String MOD_ID = "elytron";
 
 	private static final List<Block> TRAIL_BLOCKS = new ArrayList<>();
 
-	private static final Identifier ELYTRON_ID = new Identifier(MOD_ID, "elytron");
+	private static final Identifier ELYTRON_ID = Main.identifier("elytron");
 	public static final GameType<ElytronConfig> ELYTRON_TYPE = GameType.register(ELYTRON_ID, ElytronConfig.CODEC, ElytronWaitingPhase::open);
 
 	@Override
@@ -30,6 +30,10 @@ public class Main implements ModInitializer {
 
 	public static Block getTrailBlock(int index) {
 		return TRAIL_BLOCKS.get(index % TRAIL_BLOCKS.size());
+	}
+
+	public static Identifier identifier(String path) {
+		return Identifier.of(MOD_ID, path);
 	}
 
 	static {

@@ -27,6 +27,7 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.network.packet.s2c.play.TitleFadeS2CPacket;
 import net.minecraft.network.packet.s2c.play.TitleS2CPacket;
+import net.minecraft.registry.RegistryWrapper;
 import net.minecraft.registry.tag.DamageTypeTags;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
@@ -34,20 +35,22 @@ import net.minecraft.text.Text;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.Formatting;
 import net.minecraft.util.Hand;
-import net.minecraft.util.TypedActionResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.GameMode;
-import xyz.nucleoid.plasmid.game.GameActivity;
-import xyz.nucleoid.plasmid.game.GameCloseReason;
-import xyz.nucleoid.plasmid.game.GameSpace;
-import xyz.nucleoid.plasmid.game.event.GameActivityEvents;
-import xyz.nucleoid.plasmid.game.event.GamePlayerEvents;
-import xyz.nucleoid.plasmid.game.player.PlayerOffer;
-import xyz.nucleoid.plasmid.game.player.PlayerOfferResult;
-import xyz.nucleoid.plasmid.game.rule.GameRuleType;
+import xyz.nucleoid.plasmid.api.game.GameActivity;
+import xyz.nucleoid.plasmid.api.game.GameCloseReason;
+import xyz.nucleoid.plasmid.api.game.GameSpace;
+import xyz.nucleoid.plasmid.api.game.event.GameActivityEvents;
+import xyz.nucleoid.plasmid.api.game.event.GamePlayerEvents;
+import xyz.nucleoid.plasmid.api.game.player.JoinAcceptor;
+import xyz.nucleoid.plasmid.api.game.player.JoinAcceptorResult;
+import xyz.nucleoid.plasmid.api.game.player.JoinOffer;
+import xyz.nucleoid.plasmid.api.game.player.PlayerSet;
+import xyz.nucleoid.plasmid.api.game.rule.GameRuleType;
+import xyz.nucleoid.stimuli.event.EventResult;
 import xyz.nucleoid.stimuli.event.item.ItemUseEvent;
 import xyz.nucleoid.stimuli.event.player.PlayerDamageEvent;
 import xyz.nucleoid.stimuli.event.player.PlayerDeathEvent;
@@ -92,7 +95,8 @@ public class ElytronActivePhase {
 			// Listeners
 			activity.listen(GameActivityEvents.ENABLE, phase::enable);
 			activity.listen(GameActivityEvents.TICK, phase::tick);
-			activity.listen(GamePlayerEvents.OFFER, phase::offerPlayer);
+			activity.listen(GamePlayerEvents.ACCEPT, phase::onAcceptPlayers);
+			activity.listen(GamePlayerEvents.OFFER, JoinOffer::acceptSpectators);
 			activity.listen(GamePlayerEvents.REMOVE, phase::removePlayer);
 			activity.listen(PlayerDamageEvent.EVENT, phase::onPlayerDamage);
 			activity.listen(PlayerDeathEvent.EVENT, phase::onPlayerDeath);
@@ -101,21 +105,24 @@ public class ElytronActivePhase {
 	}
 
 	private void enable() {
+		PlayerSet participants = this.gameSpace.getPlayers().participants();
+		RegistryWrapper.WrapperLookup registries = this.world.getRegistryManager();
+
 		ElytronMapConfig mapConfig = this.config.getMapConfig();
 		int spawnRadius = (Math.min(mapConfig.getZ(), mapConfig.getX()) - 10) / 2;
 
 		Vec3d center = this.map.getInnerBox().getCenter();
 
 		int index = 0;
-		int total = this.gameSpace.getPlayers().size();
+		int total = participants.size();
 
- 		for (ServerPlayerEntity player : this.gameSpace.getPlayers()) {
+ 		for (ServerPlayerEntity player : participants) {
 			this.players.add(new PlayerEntry(player, Main.getTrailBlock(index)));
 	
 			player.changeGameMode(GameMode.ADVENTURE);
 			player.addStatusEffect(new StatusEffectInstance(StatusEffects.LEVITATION, STARTING_INVULNERABILITY_TICKS - ELYTRA_OPEN_TICKS, 15, true, false));
 
-			player.equipStack(EquipmentSlot.CHEST, PlayerEntry.getElytraStack());
+			player.equipStack(EquipmentSlot.CHEST, PlayerEntry.getElytraStack(registries));
 			PlayerEntry.fillHotbarWithFireworkRockets(player);
 
 			double theta = ((double) index++ / total) * 2 * Math.PI;
@@ -124,7 +131,7 @@ public class ElytronActivePhase {
 			double x = center.getX() + Math.cos(theta) * spawnRadius;
 			double z = center.getZ() + Math.sin(theta) * spawnRadius;
 
-			player.teleport(this.world, x, this.map.getInnerBox().minY, z, yaw, 0);
+			player.teleport(this.world, x, this.map.getInnerBox().minY, z, Set.of(), yaw, 0, true);
 		}
 
 		this.singleplayer = this.players.size() == 1;
@@ -235,7 +242,7 @@ public class ElytronActivePhase {
 			}
 
 			if (this.invulnerabilityTicks == 0) {
-				if (!player.isFallFlying()) {
+				if (!player.isGliding()) {
 					this.eliminate(entry, "text.elytron.eliminated.elytra_not_opened", false);
 					playerIterator.remove();
 				}
@@ -270,9 +277,9 @@ public class ElytronActivePhase {
 		player.changeGameMode(GameMode.SPECTATOR);
 	}
 
-	private PlayerOfferResult offerPlayer(PlayerOffer offer) {
-		return offer.accept(this.world, this.map.getWaitingSpawnPos()).and(() -> {
-			this.setSpectator(offer.player());
+	private JoinAcceptorResult onAcceptPlayers(JoinAcceptor acceptor) {
+		return acceptor.teleport(this.world, this.map.getWaitingSpawnPos()).thenRunForEach(player -> {
+			this.setSpectator(player);
 		});
 	}
 
@@ -303,7 +310,7 @@ public class ElytronActivePhase {
 		this.eliminate(eliminatedPlayer, "text.elytron.eliminated", remove);
 	}
 
-	private ActionResult onPlayerDamage(ServerPlayerEntity player, DamageSource source, float amount) {
+	private EventResult onPlayerDamage(ServerPlayerEntity player, DamageSource source, float amount) {
 		PlayerEntry entry = this.getPlayerEntry(player);
 
 		if (entry != null) {
@@ -318,28 +325,28 @@ public class ElytronActivePhase {
 			}
 		}
 
-		return ActionResult.FAIL;
+		return EventResult.DENY;
 	}
 
-	private ActionResult onPlayerDeath(ServerPlayerEntity player, DamageSource source) {
+	private EventResult onPlayerDeath(ServerPlayerEntity player, DamageSource source) {
 		PlayerEntry entry = this.getPlayerEntry(player);
 
 		if (entry != null) {
 			this.eliminate(entry, true);
 		}
 
-		return ActionResult.SUCCESS;
+		return EventResult.ALLOW;
 	}
 
-	private TypedActionResult<ItemStack> onUseItem(ServerPlayerEntity player, Hand hand) {
+	private ActionResult onUseItem(ServerPlayerEntity player, Hand hand) {
 		PlayerEntry.fillHotbarWithFireworkRockets(player);
 
 		ItemStack handStack = player.getStackInHand(hand);
-		if (handStack.getItem() == Items.FIREWORK_ROCKET && player.isFallFlying()) {
+		if (handStack.getItem() == Items.FIREWORK_ROCKET && player.isGliding()) {
 			handStack.increment(1);
 		}
 		
-		return TypedActionResult.pass(handStack);
+		return ActionResult.PASS;
 	}
 
 	private PlayerEntry getPlayerEntry(ServerPlayerEntity player) {
